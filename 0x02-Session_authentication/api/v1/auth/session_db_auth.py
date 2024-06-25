@@ -1,57 +1,55 @@
 #!/usr/bin/env python3
-"""Session authentication with expiration
-and storage support module for the API.
 """
-from flask import request
+Defines Session Auth class that uses a file storage DB
+"""
 from datetime import datetime, timedelta
+from typing import Union
 
 from models.user_session import UserSession
-from .session_exp_auth import SessionExpAuth
+from api.v1.auth.session_exp_auth import SessionExpAuth
 
 
 class SessionDBAuth(SessionExpAuth):
-    """Session authentication class with expiration and storage support.
     """
-
-    def create_session(self, user_id=None) -> str:
-        """Creates and stores a session id for the user.
+    Database Session Authentication implementation
+    """
+    def create_session(self, user_id=None) -> Union[str, None]:
         """
+        Create session id from random string
+        """
+        if user_id is None or type(user_id) != str:
+            return None
         session_id = super().create_session(user_id)
-        if type(session_id) == str:
-            kwargs = {
-                'user_id': user_id,
-                'session_id': session_id,
-            }
-            user_session = UserSession(**kwargs)
-            user_session.save()
-            return session_id
+        if session_id:
+            kwargs = {'user_id': user_id, 'session_id': session_id}
+            new_user_session = UserSession(**kwargs)
+            new_user_session.save()
+        return session_id
 
-    def user_id_for_session_id(self, session_id=None):
-        """Retrieves the user id of the user associated with
-        a given session id.
+    def user_id_for_session_id(self, session_id=None) -> Union[str, None]:
         """
-        try:
-            sessions = UserSession.search({'session_id': session_id})
-        except Exception:
-            return None
-        if len(sessions) <= 0:
-            return None
-        cur_time = datetime.now()
-        time_span = timedelta(seconds=self.session_duration)
-        exp_time = sessions[0].created_at + time_span
-        if exp_time < cur_time:
-            return None
-        return sessions[0].user_id
+        Get user id based on session id from DB
+        """
+        users_session = UserSession.search({'session_id': session_id})
+        if users_session != []:
+            if not (timedelta(seconds=self.session_duration) +
+                    users_session[0].created_at <= datetime.now()):
+                return users_session[0].user_id
+        return None
 
     def destroy_session(self, request=None) -> bool:
-        """Destroys an authenticated session.
         """
+        Deletes the user session from DB / logout user
+        """
+        if request is None:
+            return False
         session_id = self.session_cookie(request)
-        try:
-            sessions = UserSession.search({'session_id': session_id})
-        except Exception:
+        if session_id is None:
             return False
-        if len(sessions) <= 0:
+        if self.user_id_for_session_id(session_id) is None:
             return False
-        sessions[0].remove()
-        return True
+        usersession = UserSession.search({'session_id': session_id})
+        if usersession != []:
+            usersession[0].remove()
+            return True
+        return False
